@@ -3,12 +3,15 @@ from epub_decompressor import EpubDecompressor
 from decompressor_factory import DecompressorFactory
 from renamer import Renamer
 from settings import Settings
+from settingswindow import SettingsWindow
 import os
 import sys
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QTreeView, QFileSystemModel, QVBoxLayout, QWidget, QLabel, QLineEdit, QPushButton, QTextEdit, QHBoxLayout
+    QApplication, QMainWindow, QTreeView, QFileSystemModel, QVBoxLayout, QWidget, QLabel, 
+    QLineEdit, QPushButton, QTextEdit, QHBoxLayout, QAction, 
 )
 from PyQt5.QtCore import Qt, QDir
+from PyQt5.QtGui import QIcon
 
 
 class MainWindow(QMainWindow):
@@ -28,11 +31,16 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(640, 480)  # Минимальный размер окна 640x480
         self.resize(1600, 1000)
 
+        self.init_menu()
+
         layout = QHBoxLayout(central_widget)
 
         # Левое окно: дерево каталогов
         self.dir_model = QFileSystemModel()
         self.dir_model.setFilter(QDir.NoDotAndDotDot |QDir.AllDirs | QDir.AllEntries)
+        self.dir_model.setNameFilters(["*.epub"])  # Показываем только файлы epub
+        self.dir_model.setNameFilterDisables(False)
+
         app_directory = os.path.abspath(__file__)
         home_path = os.path.splitdrive(app_directory)[0]
         self.dir_model.setRootPath(home_path)
@@ -82,17 +90,36 @@ class MainWindow(QMainWindow):
         layout.addLayout(right_panel, 2)
 
         self.setWindowTitle("File Renamer")
+        self.setWindowIcon(QIcon("icon.ico")) 
         self.resize(800, 600)
+
+    def init_menu(self):
+        menubar = self.menuBar()
+        settings_menu = menubar.addMenu("Настройки")
+        open_settings_action = QAction("Открыть Настройки", self)
+        open_settings_action.triggered.connect(self.open_settings_window)
+        settings_menu.addAction(open_settings_action)
+
+    def open_settings_window(self):
+        self.settings_window = SettingsWindow(self.settings)
+        self.settings_window.setWindowModality(Qt.ApplicationModal) 
+        self.settings_window.show()
+        
 
     def on_tree_item_click(self, index):
         # Получаем полный путь к выбранному элементу
-        file_path = self.dir_model.filePath(index)
-        self.selected_file_label.setText(f"Имя файла: {file_path}")
-        self.current_file = file_path
+        self.file_name_text.clear();
+        self.file_author_text.clear();
+        self.file_path = self.dir_model.filePath(index)
+        self.selected_file_label.setText(f"Имя файла: {self.file_path}")
+        self.current_file = self.file_path
         if os.path.isfile(self.current_file):
             self.decompressor = self.decompressor_factory.get_decompressor(self.current_file)
             self.book = self.decompressor.decompress(self.current_file)
             self.new_file_name_input.setText(self.renamer.create_name(self.book))
+            self.file_name_text.setText(self.book.get_name())
+            self.file_author_text.setText(self.book.get_author())
+
 
     def rename_selected_file(self):
         if not hasattr(self, 'current_file'):
@@ -104,7 +131,7 @@ class MainWindow(QMainWindow):
             self.notify("Новое имя не может быть пустым.")
             return
 
-        new_file_path = os.path.join(os.path.dirname(self.current_file), new_name)
+        new_file_path = os.path.join(os.path.dirname(self.current_file), new_name) + os.path.splitext(self.file_path)[1]
         self.rename_file_logic(self.current_file, new_file_path)
 
     def move_selected_file(self):
