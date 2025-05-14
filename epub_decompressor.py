@@ -3,24 +3,28 @@ import os
 import shutil
 import tempfile
 from book import Book
-from pathlib import PurePath
 import zipfile
-import posixpath as zip_path
+
 
 class EpubDecompressor(Decompressor):
     def decompress(self, name_file):
-        new_name = name_file + 'NEW.epub'
-        shutil.copyfile(name_file, new_name)
-        name = (new_name)[:-4] + 'zip'
-        os.rename(new_name, name)
+        if not name_file.endswith('.epub'):
+            raise ValueError("Неверный формат файла. Ожидался .epub")
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            with zipfile.ZipFile(name, 'r') as myzip:
+            temp_zip_path = os.path.join(tmp_dir, 'temp.zip')
+            shutil.copyfile(name_file, temp_zip_path)
+
+            with zipfile.ZipFile(temp_zip_path, 'r') as myzip:
                 myzip.extractall(tmp_dir)
 
             ops_path = os.path.join(tmp_dir, 'OPS', 'content.opf')
+
+            if not os.path.exists(ops_path):
+                raise FileNotFoundError("Файл content.opf не найден в архиве")
+
+            author, title, series = None, None, None
             with open(ops_path, encoding="utf-8", errors='replace') as g:
-                author, title, series = None, None, None
                 for data in g:
                     j = self.KMP(data, 'creator>')
                     i = self.KMP(data, 'title>')
@@ -46,5 +50,27 @@ class EpubDecompressor(Decompressor):
                     if author and title and series:
                         break
 
-        os.remove(name)  # Удаление временного ZIP файла
         return Book(title, author, series)
+
+    @staticmethod
+    def KMP(text, pattern):
+        n, m = len(text), len(pattern)
+        lps = [0] * m
+        j = 0
+
+        for i in range(1, m):
+            while j > 0 and pattern[i] != pattern[j]:
+                j = lps[j - 1]
+            if pattern[i] == pattern[j]:
+                j += 1
+                lps[i] = j
+
+        j = 0
+        for i in range(n):
+            while j > 0 and text[i] != pattern[j]:
+                j = lps[j - 1]
+            if text[i] == pattern[j]:
+                j += 1
+                if j == m:
+                    return i - m + 1
+        return -1

@@ -31,6 +31,9 @@ class Renamer(Observer):
         if not author:
             return "Unknown Author"
 
+        if len(author) < 2:
+            return " ".join(author)  
+
         if fio_format == 0:  # Фамилия Имя Отчество
             newFIO = f"{author[0]}{separator}{author[1]}"
             if len(author) > 2:
@@ -45,6 +48,8 @@ class Renamer(Observer):
         return newFIO
 
     def _format_series(self, series, newTIT, series_position, separator):
+        if series == "" or series == "Unknown Series":   
+            return f"{newTIT}"
         if series_position == 0:
             newSer = f"{newTIT}{separator}Серия{separator}№{separator}{series}"
         else:

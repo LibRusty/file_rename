@@ -11,7 +11,7 @@ class Book:
         else:
             self.author = author
         if not series:
-            self.series = "Неизвестно"
+            self.series = ""
         else:
             self.series = series
     def get_name(self):

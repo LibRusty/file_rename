@@ -1,16 +1,16 @@
 from book import Book
-from epub_decompressor import EpubDecompressor
 from decompressor_factory import DecompressorFactory
 from renamer import Renamer
 from settings import Settings
 from settingswindow import SettingsWindow
 import os
 import sys
+import hashlib
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTreeView, QFileSystemModel, QVBoxLayout, QWidget, QLabel, 
-    QLineEdit, QPushButton, QTextEdit, QHBoxLayout, QAction, 
+    QLineEdit, QPushButton, QTextEdit, QHBoxLayout, QAction
 )
-from PyQt5.QtCore import Qt, QDir
+from PyQt5.QtCore import Qt, QDir, QFileSystemWatcher
 from PyQt5.QtGui import QIcon
 
 
@@ -20,15 +20,18 @@ class MainWindow(QMainWindow):
         self.decompressor_factory = DecompressorFactory()
         self.settings = settings
         self.renamer = Renamer(self.settings)
+        self.watcher = QFileSystemWatcher()
         self.settings.add_observer(self)
+        self.update_watched_folder()
 
-        self.history = []  # Для хранения истории операций
+        self.history = []  
+        self.processed_files = self.load_processed_files()
         self.init_ui()
 
     def init_ui(self):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        self.setMinimumSize(640, 480)  # Минимальный размер окна 640x480
+        self.setMinimumSize(640, 480)  
         self.resize(1600, 1000)
 
         self.init_menu()
@@ -38,7 +41,7 @@ class MainWindow(QMainWindow):
         # Левое окно: дерево каталогов
         self.dir_model = QFileSystemModel()
         self.dir_model.setFilter(QDir.NoDotAndDotDot |QDir.AllDirs | QDir.AllEntries)
-        self.dir_model.setNameFilters(["*.epub"])  # Показываем только файлы epub
+        self.dir_model.setNameFilters(["*.epub", "*.fb2", "*.rtf", "*.pdf", "*.mobi", "*.fb3"]) 
         self.dir_model.setNameFilterDisables(False)
 
         app_directory = os.path.abspath(__file__)
@@ -93,6 +96,19 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(QIcon("icon.ico")) 
         self.resize(800, 600)
 
+    def load_processed_files(self):
+        processed_files_path = 'processed_files.txt'
+        if os.path.exists(processed_files_path):
+            with open(processed_files_path, 'r') as file:
+                return [line.strip() for line in file.readlines()]
+        return []
+    
+    def save_processed_files(self):
+        with open('processed_files.txt', 'w') as file:
+            for file_name in self.processed_files:
+                file.write(file_name + '\n')
+    
+
     def init_menu(self):
         menubar = self.menuBar()
         settings_menu = menubar.addMenu("Настройки")
@@ -101,24 +117,29 @@ class MainWindow(QMainWindow):
         settings_menu.addAction(open_settings_action)
 
     def open_settings_window(self):
-        self.settings_window = SettingsWindow(self.settings)
+        self.settings_window = SettingsWindow(self.settings, parent=self)
         self.settings_window.setWindowModality(Qt.ApplicationModal) 
         self.settings_window.show()
         
 
     def on_tree_item_click(self, index):
-        # Получаем полный путь к выбранному элементу
-        self.file_name_text.clear();
-        self.file_author_text.clear();
+        self.file_name_text.clear()
+        self.file_author_text.clear()
         self.file_path = self.dir_model.filePath(index)
         self.selected_file_label.setText(f"Имя файла: {self.file_path}")
         self.current_file = self.file_path
+
         if os.path.isfile(self.current_file):
-            self.decompressor = self.decompressor_factory.get_decompressor(self.current_file)
-            self.book = self.decompressor.decompress(self.current_file)
-            self.new_file_name_input.setText(self.renamer.create_name(self.book))
-            self.file_name_text.setText(self.book.get_name())
-            self.file_author_text.setText(self.book.get_author())
+            try:
+                self.decompressor = self.decompressor_factory.get_decompressor(self.current_file)
+                self.book = self.decompressor.decompress(self.current_file)
+                self.new_file_name_input.setText(self.renamer.create_name(self.book))
+                self.file_name_text.setText(self.book.get_name())
+                self.file_author_text.setText(self.book.get_author())
+            except FileNotFoundError as e:
+                self.notify(f"Ошибка: {e} (файл повреждён или не является EPUB)")
+            except Exception as e:
+                self.notify(f"Неизвестная ошибка: {e}")
 
 
     def rename_selected_file(self):
@@ -161,6 +182,81 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.notify(f"Ошибка: {str(e)}")
 
+    def update_watched_folder(self):
+        self.watcher.removePaths(self.watcher.directories())
+        self.watcher.removePaths(self.watcher.files())
+
+        watched_folder = self.settings.rename_folder_path
+        if os.path.isdir(watched_folder):
+            self.watcher.addPath(watched_folder)
+            print(f"Наблюдаем за папкой: {watched_folder}")
+            self.watcher.directoryChanged.connect(self.on_directory_changed)
+
+
+    def hash_file(self, filepath):
+        hasher = hashlib.md5()
+        try:
+            with open(filepath, 'rb') as f:
+                while chunk := f.read(4096):
+                    hasher.update(chunk)
+            return hasher.hexdigest()
+        except:
+            return None  # поврежденный файл
+
+    def rename_new_files(self, folder_path):
+        try:
+            valid_extensions = ('.epub', '.fb2', '.rtf', '.mobi', '.fb3')
+            files_to_process = [
+                f for f in os.listdir(folder_path)
+                if os.path.isfile(os.path.join(folder_path, f)) and 
+                f.lower().endswith(valid_extensions)
+            ]
+
+            for file_name in files_to_process:
+                file_path = os.path.normpath(os.path.join(folder_path, file_name))
+                file_ext = os.path.splitext(file_path)[1].lower()
+
+                file_hash = self.hash_file(file_path)
+                if not file_hash or file_hash in self.processed_files:
+                    continue
+
+                try:
+                    decompressor = self.decompressor_factory.get_decompressor(file_path)
+                    book = decompressor.decompress(file_path)
+
+                    new_name = self.renamer.create_name(book)
+                    new_file_path = os.path.join(folder_path, new_name + file_ext)
+                    new_file_path = os.path.normpath(new_file_path)
+
+                    if file_path == new_file_path:
+                        self.processed_files.append(file_hash)
+                        self.save_processed_files()
+                        continue
+
+                    if os.path.exists(new_file_path):
+                        print(f"Файл уже существует: {new_file_path}")
+                        continue
+
+                    os.rename(file_path, new_file_path)
+                    self.processed_files.append(file_hash)
+                    self.save_processed_files()
+                    print(f"Успешно переименован: {file_name} -> {new_name}{file_ext}")
+
+                except FileNotFoundError as e:
+                    print(f"Файл повреждён ({file_ext}): {file_name} — {e}")
+                except Exception as e:
+                    print(f"Ошибка обработки {file_ext}-файла {file_name}: {e}")
+                    continue
+
+        except Exception as e:
+            print(f"Критическая ошибка при сканировании папки: {e}")
+
+
+
+    def on_directory_changed(self, path):
+        print(f"Обнаружены изменения в папке: {path}")
+        self.rename_new_files(path)
+
     def update_history(self):
         self.history_text.clear()
         self.history_text.setPlainText("\n".join(self.history))
@@ -170,9 +266,3 @@ class MainWindow(QMainWindow):
         self.update_history()
 
 
-if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    settings = Settings()
-    window = MainWindow(settings)
-    window.show()
-    sys.exit(app.exec_())

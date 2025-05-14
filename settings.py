@@ -11,6 +11,7 @@ class Settings:
         self.separator = self.settings.value("separator", ' ', type=str)
         self.title_position = self.settings.value("title_position", 0, type=int)
         self.series_position = self.settings.value("series_position", 0, type=int)
+        self.rename_folder_path = self.settings.value("rename_folder_path", "", type=str)
 
         self._observers = []
 
@@ -26,7 +27,7 @@ class Settings:
         for observer in self._observers:
             observer.update(self.settings)"""
 
-    def update_settings(self, fio_format=None, separator=None, title_position=None, series_position=None):
+    def update_settings(self, fio_format=None, separator=None, title_position=None, series_position=None, rename_folder_path=None):
         if fio_format is not None:
             self.fio_format = fio_format
             self.settings.setValue("fio_format", fio_format)
@@ -43,6 +44,10 @@ class Settings:
             self.series_position = series_position
             self.settings.setValue("series_position", series_position)
 
+        if rename_folder_path is not None:
+            self.rename_folder_path = rename_folder_path
+            self.settings.setValue("rename_folder_path", rename_folder_path)
+
         #self.notify_observers()
 
     def load_settings(self):
@@ -50,4 +55,5 @@ class Settings:
         self.separator = self.settings.value("separator", ' ', type=str)
         self.title_position = self.settings.value("title_position", 0, type=int)
         self.series_position = self.settings.value("series_position", 0, type=int)
+        self.rename_folder_path = self.settings.value("rename_folder_path", "", type=str)
         #self.notify_observers()
